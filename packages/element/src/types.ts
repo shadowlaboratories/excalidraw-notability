@@ -371,12 +371,15 @@ export type ExcalidrawElbowArrowElement = Merge<
   }
 >;
 
+export type PenVariant = "pen" | "pencil" | "marker" | "highlighter";
+
 export type ExcalidrawFreeDrawElement = _ExcalidrawElementBase &
   Readonly<{
     type: "freedraw";
     points: readonly LocalPoint[];
     pressures: readonly number[];
     simulatePressure: boolean;
+    penVariant: PenVariant;
   }>;
 
 export type FileId = string & { _brand: "FileId" };

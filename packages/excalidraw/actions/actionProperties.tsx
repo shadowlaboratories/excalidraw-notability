@@ -127,6 +127,10 @@ import {
   ArrowheadCrowfootIcon,
   ArrowheadCrowfootOneIcon,
   ArrowheadCrowfootOneOrManyIcon,
+  PenToolIcon,
+  PencilToolIcon,
+  MarkerToolIcon,
+  HighlighterToolIcon,
 } from "../components/icons";
 
 import { Fonts } from "../fonts";
@@ -650,6 +654,59 @@ export const actionChangeSloppiness = register<ExcalidrawElement["roughness"]>({
       </div>
     </fieldset>
   ),
+});
+
+export const actionChangePenVariant = register<string>({
+  name: "changePenVariant",
+  label: "labels.penVariant",
+  trackEvent: false,
+  perform: (elements, appState, value) => {
+    return {
+      elements,
+      appState: { ...appState, currentPenVariant: value as any },
+      captureUpdate: CaptureUpdateAction.EVENTUALLY,
+    };
+  },
+  PanelComponent: ({ elements, appState, updateData, app }) => {
+    // Only show when freedraw tool is active
+    if (appState.activeTool.type !== "freedraw") {
+      return null;
+    }
+    return (
+      <fieldset>
+        <legend>{"Pen Variant"}</legend>
+        <div className="buttonList">
+          <RadioSelection
+            group="penVariant"
+            options={[
+              {
+                value: "pen",
+                text: "Pen",
+                icon: PenToolIcon,
+              },
+              {
+                value: "pencil",
+                text: "Pencil",
+                icon: PencilToolIcon,
+              },
+              {
+                value: "marker",
+                text: "Marker",
+                icon: MarkerToolIcon,
+              },
+              {
+                value: "highlighter",
+                text: "Highlighter",
+                icon: HighlighterToolIcon,
+              },
+            ]}
+            value={appState.currentPenVariant}
+            onChange={(value) => updateData(value)}
+          />
+        </div>
+      </fieldset>
+    );
+  },
 });
 
 export const actionChangeStrokeStyle = register<

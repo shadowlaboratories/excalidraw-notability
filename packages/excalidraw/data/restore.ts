@@ -413,6 +413,7 @@ export const restoreElement = (
         points: element.points,
         simulatePressure: element.simulatePressure,
         pressures: element.pressures,
+        penVariant: (element as any).penVariant || "pen",
       });
     }
     case "image":

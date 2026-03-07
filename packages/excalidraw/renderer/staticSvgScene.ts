@@ -13,6 +13,7 @@ import {
 } from "@excalidraw/common";
 import { normalizeLink, toValidURL } from "@excalidraw/common";
 import { hashString } from "@excalidraw/element";
+import { isNotabilityStrokeShape } from "@excalidraw/element/notabilityStroke";
 import { getUncroppedWidthAndHeight } from "@excalidraw/element";
 import {
   createPlaceholderEmbeddableLabel,
@@ -380,8 +381,78 @@ const renderElementToSvg = (
       const shapes = ShapeCache.generateElementShape(element, renderConfig);
       // always ordered as [background, stroke]
       for (const shape of shapes) {
-        if (typeof shape === "string") {
-          // stroke (SVGPathString)
+        if (isNotabilityStrokeShape(shape)) {
+          // Notability-style stroke → SVG path from outline points
+          const pts = shape.outlinePoints;
+          if (pts.length > 2) {
+            let d = `M ${pts[0][0].toFixed(2)} ${pts[0][1].toFixed(2)}`;
+            for (let i = 1; i < pts.length; i++) {
+              d += ` L ${pts[i][0].toFixed(2)} ${pts[i][1].toFixed(2)}`;
+            }
+            d += " Z";
+
+            const path = svgRoot.ownerDocument.createElementNS(SVG_NS, "path");
+            path.setAttribute(
+              "fill",
+              renderConfig.theme === THEME.DARK
+                ? applyDarkModeFilter(element.strokeColor)
+                : element.strokeColor,
+            );
+            path.setAttribute("d", d);
+            path.setAttribute(
+              "opacity",
+              String(shape.penOpacity / 100),
+            );
+            if (shape.compositeOp === "multiply") {
+              path.setAttribute(
+                "style",
+                "mix-blend-mode: multiply",
+              );
+            }
+            wrapper.appendChild(path);
+          }
+
+          // Round caps
+          if (shape.roundCaps) {
+            const addCap = (
+              cx: number,
+              cy: number,
+              r: number,
+            ) => {
+              if (r > 0) {
+                const circle = svgRoot.ownerDocument.createElementNS(
+                  SVG_NS,
+                  "circle",
+                );
+                circle.setAttribute("cx", cx.toFixed(2));
+                circle.setAttribute("cy", cy.toFixed(2));
+                circle.setAttribute("r", r.toFixed(2));
+                circle.setAttribute(
+                  "fill",
+                  renderConfig.theme === THEME.DARK
+                    ? applyDarkModeFilter(element.strokeColor)
+                    : element.strokeColor,
+                );
+                circle.setAttribute(
+                  "opacity",
+                  String(shape.penOpacity / 100),
+                );
+                wrapper.appendChild(circle);
+              }
+            };
+            addCap(
+              shape.capStart.center[0],
+              shape.capStart.center[1],
+              shape.capStart.radius,
+            );
+            addCap(
+              shape.capEnd.center[0],
+              shape.capEnd.center[1],
+              shape.capEnd.radius,
+            );
+          }
+        } else if (typeof shape === "string") {
+          // Legacy stroke (SVGPathString)
 
           const path = svgRoot.ownerDocument.createElementNS(SVG_NS, "path");
           path.setAttribute(

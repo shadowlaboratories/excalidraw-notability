@@ -42,14 +42,14 @@
   "prettier": "@excalidraw/prettier-config",
   "scripts": {
     "build-node": "node ./scripts/build-node.js",
-    "build:app:docker": "cross-env VITE_APP_DISABLE_SENTRY=true vite build",
-    "build:app": "cross-env VITE_APP_GIT_SHA=$VERCEL_GIT_COMMIT_SHA cross-env VITE_APP_ENABLE_TRACKING=true vite build",
+    "build:app:docker": "cross-env VITE_APP_DISABLE_SENTRY=true bun --bun vite build",
+    "build:app": "cross-env VITE_APP_GIT_SHA=$VERCEL_GIT_COMMIT_SHA cross-env VITE_APP_ENABLE_TRACKING=true bun --bun vite build",
     "build:version": "node ../scripts/build-version.js",
-    "build": "yarn build:app && yarn build:version",
-    "start": "yarn && vite",
-    "start:production": "yarn build && yarn serve",
-    "serve": "npx http-server build -a localhost -p 5001 -o",
-    "build:preview": "yarn build && vite preview --port 5000"
+    "build": "bun run build:app && bun run build:version",
+    "start": "bun install && bun --bun vite --host --port 3456",
+    "start:production": "bun run build && bun run serve",
+    "serve": "bunx http-server build -a localhost -p 5001 -o",
+    "build:preview": "bun run build && bun --bun vite preview --port 5000"
   },
   "devDependencies": {
     "vite-plugin-sitemap": "0.7.1"

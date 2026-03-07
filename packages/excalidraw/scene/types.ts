@@ -20,6 +20,7 @@ import type {
 } from "../types";
 import type { RoughCanvas } from "roughjs/bin/canvas";
 import type { Drawable } from "roughjs/bin/core";
+import type { NotabilityStrokeShape } from "@excalidraw/element/notabilityStroke";
 
 export type RenderableElementsMap = NonDeletedElementsMap &
   MakeBrand<"RenderableElementsMap">;
@@ -156,7 +157,7 @@ export type ElementShape =
   | Drawable
   | Drawable[]
   | Path2D
-  | (Drawable | SVGPathString)[]
+  | (Drawable | SVGPathString | NotabilityStrokeShape)[]
   | null;
 
 export type ElementShapes = {
@@ -165,7 +166,7 @@ export type ElementShapes = {
   diamond: Drawable;
   iframe: Drawable;
   embeddable: Drawable;
-  freedraw: (Drawable | SVGPathString)[];
+  freedraw: (Drawable | SVGPathString | NotabilityStrokeShape)[];
   arrow: Drawable[];
   line: Drawable[];
   text: null;

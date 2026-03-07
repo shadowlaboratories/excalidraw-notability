@@ -433,6 +433,105 @@ const ExcalidrawWrapper = () => {
     }
   }, [excalidrawAPI]);
 
+  // Expose API globally for debugging and scripts
+  useEffect(() => {
+    if (excalidrawAPI) {
+      (window as any).excalidrawAPI = excalidrawAPI;
+      /**
+       * Export the scene as per-page PNGs matching Notability's resolution.
+       * Returns an array of byte arrays, one per page.
+       */
+      (window as any).exportToPages = async ({
+        pageWidthDoc = 574,
+        pageHeightDoc,
+        pagePixelWidth = 1995,
+        pagePixelHeight = 2500,
+      }: {
+        pageWidthDoc?: number;
+        pageHeightDoc?: number;
+        pagePixelWidth?: number;
+        pagePixelHeight?: number;
+      } = {}) => {
+        const elements = excalidrawAPI.getSceneElements();
+        const files = excalidrawAPI.getFiles();
+        if (!elements.length) {
+          return [];
+        }
+
+        const scaleX = pagePixelWidth / pageWidthDoc;
+        const resolvedPageHeightDoc = pageHeightDoc ?? pagePixelHeight / scaleX;
+        const scaleY = pagePixelHeight / resolvedPageHeightDoc;
+        const exportScale = Math.max(scaleX, scaleY);
+
+        // Export full scene at correct pixel density
+        const { exportToBlob } = await import("@excalidraw/utils");
+        const blob = await exportToBlob({
+          elements,
+          files,
+          appState: {
+            exportBackground: true,
+            viewBackgroundColor: "#ffffff",
+          },
+          exportPadding: 0,
+          getDimensions: (w: number, h: number) => ({
+            width: Math.round(w * exportScale),
+            height: Math.round(h * exportScale),
+            scale: exportScale,
+          }),
+          mimeType: "image/png",
+        });
+
+        // Load as image
+        const img = new Image();
+        img.src = URL.createObjectURL(blob);
+        await new Promise((r) => {
+          img.onload = r;
+        });
+
+        // Get exact content bounds (matches what exportToBlob used internally)
+        const { getCommonBounds } = await import(
+          "@excalidraw/element/bounds"
+        );
+        const [minX, minY, , maxY] = getCommonBounds(elements);
+
+        // Ignore tiny bbox spillover from stroke bounds so we don't create
+        // an extra page for just a few pixels of overflow.
+        const rawPages = maxY / resolvedPageHeightDoc;
+        let numPages = Math.floor(rawPages);
+        if (rawPages - numPages > 0.05 || numPages === 0) {
+          numPages += 1;
+        }
+        const pages: number[][] = [];
+        const exportedWidth = img.width * (scaleX / exportScale);
+        const exportedHeight = img.height * (scaleY / exportScale);
+
+        for (let p = 0; p < numPages; p++) {
+          const canvas = document.createElement("canvas");
+          canvas.width = pagePixelWidth;
+          canvas.height = pagePixelHeight;
+          const ctx = canvas.getContext("2d")!;
+
+          ctx.fillStyle = "#ffffff";
+          ctx.fillRect(0, 0, pagePixelWidth, pagePixelHeight);
+
+          // Place exported image so that doc (0, p*pageHeightDoc) maps to pixel (0, 0)
+          const drawX = minX * scaleX;
+          const drawY = (minY - p * resolvedPageHeightDoc) * scaleY;
+          ctx.drawImage(img, drawX, drawY, exportedWidth, exportedHeight);
+
+          const pageBlob: Blob = await new Promise((r) =>
+            canvas.toBlob(r as BlobCallback, "image/png"),
+          );
+          const buf = await pageBlob.arrayBuffer();
+          pages.push(Array.from(new Uint8Array(buf)));
+        }
+
+        URL.revokeObjectURL(img.src);
+        return pages;
+      };
+    }
+  }, [excalidrawAPI]);
+
   useEffect(() => {
     if (!excalidrawAPI || (!isCollabDisabled && !collabAPI)) {
       return;

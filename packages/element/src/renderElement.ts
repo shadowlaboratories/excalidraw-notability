@@ -9,6 +9,9 @@ import {
   type Radians,
 } from "@excalidraw/math";
 
+import { isNotabilityStrokeShape } from "./notabilityStroke";
+import type { NotabilityStrokeShape } from "./notabilityStroke";
+
 import {
   BOUND_TEXT_PADDING,
   DEFAULT_REDUCED_GLOBAL_ALPHA,
@@ -421,7 +424,71 @@ const drawElementOnCanvas = (
       const shapes = ShapeCache.generateElementShape(element, renderConfig);
 
       for (const shape of shapes) {
-        if (typeof shape === "string") {
+        if (isNotabilityStrokeShape(shape)) {
+          // Notability-style stroke rendering
+          const strokeData = shape as NotabilityStrokeShape;
+          const prevComposite = context.globalCompositeOperation;
+          const prevAlpha = context.globalAlpha;
+
+          context.globalCompositeOperation = strokeData.compositeOp;
+          context.globalAlpha = prevAlpha * (strokeData.penOpacity / 100);
+          context.fillStyle =
+            renderConfig.theme === THEME.DARK
+              ? applyDarkModeFilter(element.strokeColor)
+              : element.strokeColor;
+
+          if (strokeData.sampledContours && strokeData.sampledContours.length > 0) {
+            const sampledPath = new Path2D();
+            for (const contour of strokeData.sampledContours) {
+              if (contour.length < 3) {
+                continue;
+              }
+              sampledPath.moveTo(contour[0][0], contour[0][1]);
+              for (let index = 1; index < contour.length; index++) {
+                sampledPath.lineTo(contour[index][0], contour[index][1]);
+              }
+              sampledPath.closePath();
+            }
+            context.fill(sampledPath);
+          } else if (strokeData.pathData) {
+            context.fill(new Path2D(strokeData.pathData));
+          } else {
+            // Build Path2D from outline points using smooth quadratic curves
+            const pts = strokeData.outlinePoints;
+            if (pts.length > 2) {
+              const path = new Path2D();
+              path.moveTo(pts[0][0], pts[0][1]);
+              for (let i = 1; i < pts.length - 1; i++) {
+                const midX = (pts[i][0] + pts[i + 1][0]) / 2;
+                const midY = (pts[i][1] + pts[i + 1][1]) / 2;
+                path.quadraticCurveTo(pts[i][0], pts[i][1], midX, midY);
+              }
+              path.lineTo(pts[pts.length - 1][0], pts[pts.length - 1][1]);
+              path.closePath();
+              context.fill(path);
+            }
+          }
+
+          // Round end caps
+          if (strokeData.roundCaps) {
+            const capPath = new Path2D();
+            const { center: sc, radius: sr } = strokeData.capStart;
+            if (sr > 0) {
+              capPath.moveTo(sc[0] + sr, sc[1]);
+              capPath.arc(sc[0], sc[1], sr, 0, Math.PI * 2);
+            }
+            const { center: ec, radius: er } = strokeData.capEnd;
+            if (er > 0) {
+              capPath.moveTo(ec[0] + er, ec[1]);
+              capPath.arc(ec[0], ec[1], er, 0, Math.PI * 2);
+            }
+            context.fill(capPath);
+          }
+
+          context.globalCompositeOperation = prevComposite;
+          context.globalAlpha = prevAlpha;
+        } else if (typeof shape === "string") {
+          // Legacy SVG path string (backward compatibility)
           context.fillStyle =
             renderConfig.theme === THEME.DARK
               ? applyDarkModeFilter(element.strokeColor)
@@ -844,7 +911,12 @@ export const renderElement = (
       break;
     }
     case "freedraw": {
-      if (renderConfig.isExporting) {
+      // Highlighter elements must render directly to the scene canvas
+      // (not via cached element canvas) so the multiply blend mode
+      // composes against existing drawn content.
+      const isHighlighter = (element as any).penVariant === "highlighter";
+
+      if (renderConfig.isExporting || isHighlighter) {
         const [x1, y1, x2, y2] = getElementAbsoluteCoords(element, elementsMap);
         const cx = (x1 + x2) / 2 + appState.scrollX;
         const cy = (y1 + y2) / 2 + appState.scrollY;
