@@ -424,7 +424,7 @@ export const DEFAULT_ELEMENT_PROPS: {
   fillStyle: "solid",
   strokeWidth: 2,
   strokeStyle: "solid",
-  roughness: ROUGHNESS.artist,
+  roughness: ROUGHNESS.architect, // Clean shapes (Notability-style)
   opacity: 100,
   locked: false,
 };

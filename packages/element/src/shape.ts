@@ -1,5 +1,9 @@
 import { simplify } from "points-on-curve";
 import { getStroke } from "perfect-freehand";
+import {
+  generateNotabilityStroke,
+  hasImportedNotabilityStrokeData,
+} from "./notabilityStroke";
 
 import {
   type GeometricShape,
@@ -853,7 +857,11 @@ const _generateElementShape = (
       }
 
       // (2) stroke
-      shapes.push(getFreeDrawSvgPath(element));
+      shapes.push(
+        hasImportedNotabilityStrokeData(element)
+          ? generateNotabilityStroke(element)
+          : getFreeDrawSvgPath(element),
+      );
 
       return shapes;
     }
@@ -1050,6 +1058,9 @@ const getFreeDrawSvgPath = (element: ExcalidrawFreeDrawElement) => {
   ) as SVGPathString;
 };
 
+const IMPORTED_NOTABILITY_THINNING = 0.25;
+const IMPORTED_NOTABILITY_THICK_STROKE_WIDTH = 0.2;
+
 export const getFreedrawOutlinePoints = (
   element: ExcalidrawFreeDrawElement,
 ) => {
@@ -1060,10 +1071,18 @@ export const getFreedrawOutlinePoints = (
     ? element.points.map(([x, y], i) => [x, y, element.pressures[i]])
     : [[0, 0, 0.5]];
 
+  const isImportedNotabilityStroke =
+    !element.simulatePressure &&
+    element.pressures.length === element.points.length &&
+    element.pressures.some((pressure) => pressure > 1);
+  const usesReducedImportedThinning =
+    isImportedNotabilityStroke &&
+    element.strokeWidth >= IMPORTED_NOTABILITY_THICK_STROKE_WIDTH;
+
   return getStroke(inputPoints as number[][], {
     simulatePressure: element.simulatePressure,
     size: element.strokeWidth * 4.25,
-    thinning: 0.6,
+    thinning: usesReducedImportedThinning ? IMPORTED_NOTABILITY_THINNING : 0.6,
     smoothing: 0.5,
     streamline: 0.5,
     easing: (t) => Math.sin((t * Math.PI) / 2), // https://easings.net/#easeOutSine

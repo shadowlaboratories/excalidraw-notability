@@ -12,6 +12,7 @@ import type { MaybeTransformHandleType } from "@excalidraw/element";
 
 import type {
   PointerType,
+  PenVariant,
   ExcalidrawLinearElement,
   NonDeletedExcalidrawElement,
   NonDeleted,
@@ -355,6 +356,7 @@ export interface AppState {
   currentItemStrokeWidth: number;
   currentItemStrokeStyle: ExcalidrawElement["strokeStyle"];
   currentItemRoughness: number;
+  currentPenVariant: PenVariant;
   currentItemOpacity: number;
   currentItemFontFamily: FontFamilyValues;
   currentItemFontSize: number;

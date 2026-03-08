@@ -8487,6 +8487,7 @@ class App extends React.Component<AppProps, AppState> {
       frameId: topLayerFrame ? topLayerFrame.id : null,
       points: [pointFrom<LocalPoint>(0, 0)],
       pressures: simulatePressure ? [] : [event.pressure],
+      penVariant: this.state.currentPenVariant,
     });
 
     this.scene.insertElement(element);

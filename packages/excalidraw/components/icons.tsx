@@ -393,6 +393,42 @@ export const FreedrawIcon = createIcon(
   modifiedTablerIconProps,
 );
 
+// Notability-style pen tool variant icons
+export const PenToolIcon = createIcon(
+  <g strokeWidth="1.25">
+    <path d="M17.5 3.5l-12 12v3h3l12-12-3-3z" />
+    <path d="M13 7l3 3" />
+  </g>,
+  modifiedTablerIconProps,
+);
+
+export const PencilToolIcon = createIcon(
+  <g strokeWidth="1.25">
+    <path d="M4 20l4-1 12-12-3-3L5 16l-1 4z" />
+    <path d="M13.5 6.5l3 3" />
+    <path d="M4 20l1.5-1.5" strokeDasharray="2 2" />
+  </g>,
+  modifiedTablerIconProps,
+);
+
+export const MarkerToolIcon = createIcon(
+  <g strokeWidth="1.5">
+    <path d="M9 17l-4.5 1.5L6 14l10-10 3 3L9 17z" />
+    <path d="M12 4l4 4" />
+    <rect x="4" y="16" width="5" height="3" rx="1" fill="currentColor" opacity="0.3" />
+  </g>,
+  modifiedTablerIconProps,
+);
+
+export const HighlighterToolIcon = createIcon(
+  <g strokeWidth="1.25">
+    <path d="M14 3l7 7-8.5 8.5H7L4.5 16V10.5L14 3z" />
+    <path d="M4 20h6" />
+    <rect x="6" y="13" width="8" height="3" rx="1" fill="currentColor" opacity="0.25" />
+  </g>,
+  modifiedTablerIconProps,
+);
+
 // tabler-icons: typography
 export const TextIcon = createIcon(
   <g strokeWidth="1.5">

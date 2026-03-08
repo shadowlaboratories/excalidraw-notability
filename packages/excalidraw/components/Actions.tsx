@@ -213,6 +213,8 @@ export const SelectedShapeActions = ({
         </>
       )}
 
+      {renderAction("changePenVariant")}
+
       {(canChangeRoundness(appState.activeTool.type) ||
         targetElements.some((element) => canChangeRoundness(element.type))) && (
         <>{renderAction("changeRoundness")}</>
@@ -403,6 +405,7 @@ const CombinedShapeProperties = ({
                   {renderAction("changeSloppiness")}
                 </>
               )}
+              {renderAction("changePenVariant")}
               {(canChangeRoundness(appState.activeTool.type) ||
                 targetElements.some((element) =>
                   canChangeRoundness(element.type),
