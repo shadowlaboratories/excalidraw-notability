@@ -259,6 +259,11 @@ import {
 } from "@excalidraw/element";
 
 import type { GlobalPoint, LocalPoint, Radians } from "@excalidraw/math";
+import {
+  appendLiveNotabilitySample,
+  createLiveNotabilitySample,
+  createLiveNotabilityStrokeData,
+} from "@excalidraw/element/notabilityStroke";
 
 import type {
   ExcalidrawElement,
@@ -8469,6 +8474,10 @@ class App extends React.Component<AppProps, AppState> {
     });
 
     const simulatePressure = event.pressure === 0.5;
+    const liveNotabilityStroke = createLiveNotabilityStrokeData(
+      this.state.zoom.value,
+      createLiveNotabilitySample(event.nativeEvent),
+    );
 
     const element = newFreeDrawElement({
       type: elementType,
@@ -8488,6 +8497,9 @@ class App extends React.Component<AppProps, AppState> {
       points: [pointFrom<LocalPoint>(0, 0)],
       pressures: simulatePressure ? [] : [event.pressure],
       penVariant: this.state.currentPenVariant,
+      customData: {
+        liveNotabilityStroke,
+      },
     });
 
     this.scene.insertElement(element);
@@ -9834,12 +9846,20 @@ class App extends React.Component<AppProps, AppState> {
             const pressures = newElement.simulatePressure
               ? newElement.pressures
               : [...newElement.pressures, event.pressure];
+            const liveNotabilityStroke = appendLiveNotabilitySample(
+              newElement.customData?.liveNotabilityStroke as any,
+              createLiveNotabilitySample(event),
+            );
 
             this.scene.mutateElement(
               newElement,
               {
                 points: [...points, pointFrom<LocalPoint>(dx, dy)],
                 pressures,
+                customData: {
+                  ...newElement.customData,
+                  liveNotabilityStroke,
+                },
               },
               {
                 informMutation: false,
@@ -10289,10 +10309,18 @@ class App extends React.Component<AppProps, AppState> {
         const pressures = newElement.simulatePressure
           ? []
           : [...newElement.pressures, childEvent.pressure];
+        const liveNotabilityStroke = appendLiveNotabilitySample(
+          newElement.customData?.liveNotabilityStroke as any,
+          createLiveNotabilitySample(childEvent),
+        );
 
         this.scene.mutateElement(newElement, {
           points: [...points, pointFrom<LocalPoint>(dx, dy)],
           pressures,
+          customData: {
+            ...newElement.customData,
+            liveNotabilityStroke,
+          },
         });
 
         this.actionManager.executeAction(actionFinalize);

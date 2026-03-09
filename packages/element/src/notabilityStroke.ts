@@ -2,8 +2,9 @@
  * Notability-style stroke renderer.
  *
  * Imported Notability strokes use the raw cubic control points and attribute
- * samples preserved in element.customData. Native Excalidraw freedraw falls
- * back to the existing Catmull-Rom + outline polygon path.
+ * samples preserved in element.customData. Fresh strokes can also opt into a
+ * live Notability-style fitter by storing richer pointer samples in
+ * element.customData.
  */
 
 import type { ExcalidrawFreeDrawElement, PenVariant } from "./types";
@@ -35,6 +36,24 @@ type ImportedNotabilityStrokeData = {
     readonly b: number;
     readonly a: number;
   };
+};
+
+export type LiveNotabilityStrokeSample = {
+  readonly timestamp: number;
+  readonly force: number;
+  readonly azimuthX: number;
+  readonly azimuthY: number;
+  readonly altitude: number;
+  readonly predicted?: boolean;
+  readonly estimatedPropsExpectingUpdates?: number;
+  readonly expectedUpdatesTimedOut?: boolean;
+};
+
+export type LiveNotabilityStrokeData = {
+  readonly version: 1;
+  readonly source: "excalidraw-live-input";
+  readonly zoomAtCreation: number;
+  readonly samples: readonly LiveNotabilityStrokeSample[];
 };
 
 // ---------------------------------------------------------------------------
@@ -128,6 +147,17 @@ export type NotabilityStrokeShape = {
 
 const IMPORTED_NOTABILITY_CURVE_POINT_DIVISION_COUNT = 3;
 const MIN_STROKE_POINT_DISTANCE = 0.35;
+const DEFAULT_LIVE_FORCE = 0.5;
+const DEFAULT_LIVE_ALTITUDE = Math.PI / 2;
+
+type PointerSampleLike = {
+  pressure?: number;
+  timeStamp?: number;
+  altitudeAngle?: number;
+  azimuthAngle?: number;
+  tiltX?: number;
+  tiltY?: number;
+};
 
 function importedBaseWidthCalibration(payload: ImportedNotabilityStrokeData) {
   return 1;
@@ -157,10 +187,120 @@ function getImportedNotabilityStrokeData(
   return null;
 }
 
+export function getLiveNotabilityStrokeData(
+  element: ExcalidrawFreeDrawElement,
+): LiveNotabilityStrokeData | null {
+  const payload = element.customData?.liveNotabilityStroke;
+  if (
+    payload &&
+    typeof payload === "object" &&
+    (payload as LiveNotabilityStrokeData).source === "excalidraw-live-input" &&
+    Array.isArray((payload as LiveNotabilityStrokeData).samples)
+  ) {
+    return payload as LiveNotabilityStrokeData;
+  }
+
+  return null;
+}
+
 export function hasImportedNotabilityStrokeData(
   element: ExcalidrawFreeDrawElement,
 ): boolean {
   return getImportedNotabilityStrokeData(element) !== null;
+}
+
+export function hasLiveNotabilityStrokeData(
+  element: ExcalidrawFreeDrawElement,
+): boolean {
+  return getLiveNotabilityStrokeData(element) !== null;
+}
+
+function isFiniteNumber(value: unknown): value is number {
+  return typeof value === "number" && Number.isFinite(value);
+}
+
+function resolveLiveAltitudeAngle(event: PointerSampleLike) {
+  if (isFiniteNumber(event.altitudeAngle)) {
+    return event.altitudeAngle;
+  }
+
+  const tiltX = isFiniteNumber(event.tiltX) ? event.tiltX : 0;
+  const tiltY = isFiniteNumber(event.tiltY) ? event.tiltY : 0;
+  const tiltMagnitude = Math.min(90, Math.hypot(tiltX, tiltY));
+  return Math.max(0, DEFAULT_LIVE_ALTITUDE - (tiltMagnitude * Math.PI) / 180);
+}
+
+function resolveLiveAzimuthVector(
+  event: PointerSampleLike,
+): [number, number] {
+  if (isFiniteNumber(event.azimuthAngle)) {
+    return [Math.cos(event.azimuthAngle), Math.sin(event.azimuthAngle)];
+  }
+
+  const tiltX = isFiniteNumber(event.tiltX) ? event.tiltX : 0;
+  const tiltY = isFiniteNumber(event.tiltY) ? event.tiltY : 0;
+  const length = Math.hypot(tiltX, tiltY);
+  if (length > 1e-6) {
+    return [tiltX / length, tiltY / length];
+  }
+
+  return [1, 0];
+}
+
+export function createLiveNotabilitySample(
+  event: PointerSampleLike,
+): LiveNotabilityStrokeSample {
+  const force =
+    isFiniteNumber(event.pressure) && event.pressure > 0
+      ? event.pressure
+      : DEFAULT_LIVE_FORCE;
+  const [azimuthX, azimuthY] = resolveLiveAzimuthVector(event);
+
+  return {
+    timestamp: isFiniteNumber(event.timeStamp) ? event.timeStamp : Date.now(),
+    force,
+    azimuthX,
+    azimuthY,
+    altitude: resolveLiveAltitudeAngle(event),
+    predicted: false,
+    estimatedPropsExpectingUpdates: 0,
+    expectedUpdatesTimedOut: false,
+  };
+}
+
+export function createLiveNotabilityStrokeData(
+  zoomAtCreation: number,
+  sample: LiveNotabilityStrokeSample,
+): LiveNotabilityStrokeData {
+  return {
+    version: 1,
+    source: "excalidraw-live-input",
+    zoomAtCreation:
+      isFiniteNumber(zoomAtCreation) && zoomAtCreation > 0
+        ? zoomAtCreation
+        : 1,
+    samples: [sample],
+  };
+}
+
+export function appendLiveNotabilitySample(
+  payload: LiveNotabilityStrokeData | null | undefined,
+  sample: LiveNotabilityStrokeSample,
+): LiveNotabilityStrokeData {
+  return {
+    version: 1,
+    source: "excalidraw-live-input",
+    zoomAtCreation:
+      payload && payload.source === "excalidraw-live-input" &&
+      isFiniteNumber(payload.zoomAtCreation) &&
+      payload.zoomAtCreation > 0
+        ? payload.zoomAtCreation
+        : 1,
+    samples:
+      payload && payload.source === "excalidraw-live-input"
+        ? [...payload.samples, sample]
+        : [sample],
+  };
 }
 
 // ---------------------------------------------------------------------------
@@ -465,6 +605,55 @@ type CubicCurve = {
   p2: [number, number];
   p3: [number, number];
 };
+
+type NativeNotabilityControlPoint = {
+  location: [number, number];
+  timestamp: number;
+  force: number;
+  altitude: number;
+  azimuthX: number;
+  azimuthY: number;
+  predicted: boolean;
+  estimatedPropsExpectingUpdates: number;
+  expectedUpdatesTimedOut: boolean;
+};
+
+type NativeCurveItem = {
+  curve: CubicCurve;
+  windowStart: number;
+  windowEnd: number;
+  t0: number;
+  t1: number;
+};
+
+type NativePathAttribute = {
+  widthScale: number;
+  force: number;
+  altitude: number;
+  azimuthX: number;
+  azimuthY: number;
+};
+
+type NativeAttributedCurve = {
+  curve: CubicCurve;
+  startIndex: number;
+  endIndex: number;
+  startAttribute: NativePathAttribute;
+  endAttribute: NativePathAttribute;
+};
+
+const NATIVE_FIT_EPSILON = 1e-9;
+const NATIVE_MIN_EFFECTIVE_SIZE = 2.6;
+const NATIVE_MAX_EFFECTIVE_SIZE = 18;
+const NATIVE_EFFECTIVE_SIZE_RANGE = 15.4;
+const NATIVE_FORCE_TO_WIDTH_SCALE = 0.67;
+const NATIVE_FORCE_BASELINE = 0.7;
+const NATIVE_FORCE_SPLIT_THRESHOLD = 0.25;
+const NATIVE_ALTITUDE_SPLIT_THRESHOLD = (5 * Math.PI) / 180;
+const NATIVE_AZIMUTH_SPLIT_THRESHOLD = 0.01;
+const NATIVE_WIDTH_SCREEN_SPLIT_THRESHOLD = 0.5;
+const NATIVE_FIT_CONTEXT_RADIUS = 5;
+const NATIVE_MAX_FIT_SAMPLES = 200;
 
 type SvgPathElement =
   | {
@@ -937,6 +1126,643 @@ function splitCubicAt(
       p2: p23,
       p3: segment.p3,
     },
+  };
+}
+
+function createFallbackLiveSample(
+  element: ExcalidrawFreeDrawElement,
+  index: number,
+): LiveNotabilityStrokeSample {
+  const force =
+    !element.simulatePressure &&
+    index < element.pressures.length &&
+    isFiniteNumber(element.pressures[index])
+      ? element.pressures[index]
+      : DEFAULT_LIVE_FORCE;
+
+  return {
+    timestamp: index,
+    force,
+    azimuthX: 1,
+    azimuthY: 0,
+    altitude: DEFAULT_LIVE_ALTITUDE,
+    predicted: false,
+    estimatedPropsExpectingUpdates: 0,
+    expectedUpdatesTimedOut: false,
+  };
+}
+
+function buildLiveNotabilityControlPoints(
+  element: ExcalidrawFreeDrawElement,
+  payload: LiveNotabilityStrokeData,
+) {
+  const controlPoints: NativeNotabilityControlPoint[] = [];
+
+  for (let index = 0; index < element.points.length; index++) {
+    const point = element.points[index];
+    const sample = payload.samples[index] ?? createFallbackLiveSample(element, index);
+    const controlPoint: NativeNotabilityControlPoint = {
+      location: [point[0], point[1]],
+      timestamp: isFiniteNumber(sample.timestamp) ? sample.timestamp : index,
+      force: isFiniteNumber(sample.force) ? sample.force : DEFAULT_LIVE_FORCE,
+      azimuthX: isFiniteNumber(sample.azimuthX) ? sample.azimuthX : 1,
+      azimuthY: isFiniteNumber(sample.azimuthY) ? sample.azimuthY : 0,
+      altitude: isFiniteNumber(sample.altitude)
+        ? sample.altitude
+        : DEFAULT_LIVE_ALTITUDE,
+      predicted: sample.predicted === true,
+      estimatedPropsExpectingUpdates: isFiniteNumber(
+        sample.estimatedPropsExpectingUpdates,
+      )
+        ? sample.estimatedPropsExpectingUpdates
+        : 0,
+      expectedUpdatesTimedOut: sample.expectedUpdatesTimedOut === true,
+    };
+
+    const previousPoint = controlPoints[controlPoints.length - 1];
+    if (
+      previousPoint &&
+      previousPoint.location[0] === controlPoint.location[0] &&
+      previousPoint.location[1] === controlPoint.location[1]
+    ) {
+      controlPoints[controlPoints.length - 1] = controlPoint;
+      continue;
+    }
+
+    controlPoints.push(controlPoint);
+  }
+
+  return controlPoints;
+}
+
+function solveNative2x2(
+  m00: number,
+  m01: number,
+  m11: number,
+  b0: number,
+  b1: number,
+): [number, number] | null {
+  const determinant = m00 * m11 - m01 * m01;
+  if (Math.abs(determinant) <= NATIVE_FIT_EPSILON) {
+    return null;
+  }
+
+  return [
+    (b0 * m11 - b1 * m01) / determinant,
+    (m00 * b1 - m01 * b0) / determinant,
+  ];
+}
+
+function chordFallbackCurve(
+  p0: [number, number],
+  p3: [number, number],
+): CubicCurve {
+  return {
+    p0,
+    p1: pointLerp(p0, p3, 1 / 3),
+    p2: pointLerp(p0, p3, 2 / 3),
+    p3,
+  };
+}
+
+function fitNativeCubicLeastSquares(
+  samples: readonly [number, number][],
+  uValues: readonly number[],
+  p0: [number, number],
+  p3: [number, number],
+): CubicCurve {
+  let m00 = 0;
+  let m01 = 0;
+  let m11 = 0;
+  let bx0 = 0;
+  let bx1 = 0;
+  let by0 = 0;
+  let by1 = 0;
+
+  for (let index = 0; index < samples.length; index++) {
+    const point = samples[index];
+    const u = uValues[index];
+    const oneMinusU = 1 - u;
+    const b0 = oneMinusU * oneMinusU * oneMinusU;
+    const b1 = 3 * oneMinusU * oneMinusU * u;
+    const b2 = 3 * oneMinusU * u * u;
+    const b3 = u * u * u;
+    const targetX = point[0] - (p0[0] * b0 + p3[0] * b3);
+    const targetY = point[1] - (p0[1] * b0 + p3[1] * b3);
+
+    m00 += b1 * b1;
+    m01 += b1 * b2;
+    m11 += b2 * b2;
+    bx0 += b1 * targetX;
+    bx1 += b2 * targetX;
+    by0 += b1 * targetY;
+    by1 += b2 * targetY;
+  }
+
+  const solvedX = solveNative2x2(m00, m01, m11, bx0, bx1);
+  const solvedY = solveNative2x2(m00, m01, m11, by0, by1);
+  if (!solvedX || !solvedY) {
+    return chordFallbackCurve(p0, p3);
+  }
+
+  return {
+    p0,
+    p1: [solvedX[0], solvedY[0]],
+    p2: [solvedX[1], solvedY[1]],
+    p3,
+  };
+}
+
+function nativeDistancePointToCubic(
+  point: [number, number],
+  curve: CubicCurve,
+  coarseSteps: number = 32,
+  refineSteps: number = 8,
+) {
+  let bestU = 0;
+  let bestDistanceSquared = Number.POSITIVE_INFINITY;
+
+  for (let step = 0; step <= coarseSteps; step++) {
+    const u = step / coarseSteps;
+    const candidate = cubicCurvePointAt(curve, u);
+    const distanceSquared = pointDistanceSquared(point, candidate);
+    if (distanceSquared < bestDistanceSquared) {
+      bestDistanceSquared = distanceSquared;
+      bestU = u;
+    }
+  }
+
+  const coarseSpan = 1 / coarseSteps;
+  let low = Math.max(0, bestU - coarseSpan);
+  let high = Math.min(1, bestU + coarseSpan);
+
+  for (let step = 0; step < refineSteps; step++) {
+    const u1 = low + (high - low) / 3;
+    const u2 = high - (high - low) / 3;
+    const distance1 = pointDistanceSquared(point, cubicCurvePointAt(curve, u1));
+    const distance2 = pointDistanceSquared(point, cubicCurvePointAt(curve, u2));
+
+    if (distance1 < distance2) {
+      high = u2;
+      bestDistanceSquared = Math.min(bestDistanceSquared, distance1);
+    } else {
+      low = u1;
+      bestDistanceSquared = Math.min(bestDistanceSquared, distance2);
+    }
+  }
+
+  return Math.sqrt(bestDistanceSquared);
+}
+
+function computeNativeErrorThreshold(baseWidth: number, zoom: number) {
+  const safeZoom = zoom > 0 ? zoom : 1;
+  const effective = clamp(
+    baseWidth * safeZoom,
+    NATIVE_MIN_EFFECTIVE_SIZE,
+    NATIVE_MAX_EFFECTIVE_SIZE,
+  );
+  const normalized =
+    (effective - NATIVE_MIN_EFFECTIVE_SIZE) / NATIVE_EFFECTIVE_SIZE_RANGE;
+
+  return (0.5 / (1 + 1.5 * normalized)) / safeZoom;
+}
+
+function fitNativeCandidate(
+  controlPoints: readonly NativeNotabilityControlPoint[],
+  t0: number,
+  t1: number,
+): { item: NativeCurveItem; error: number } {
+  const last = controlPoints.length - 1;
+  const windowStart = Math.max(0, t0 - NATIVE_FIT_CONTEXT_RADIUS);
+  const windowEnd = Math.min(last, t1 + NATIVE_FIT_CONTEXT_RADIUS);
+  const denominator = Math.max(1, t1 - t0);
+  const samples = controlPoints
+    .slice(windowStart, windowEnd + 1)
+    .map((point) => point.location);
+  const uValues = Array.from(
+    { length: windowEnd - windowStart + 1 },
+    (_, offset) => (windowStart + offset - t0) / denominator,
+  );
+  const curve = fitNativeCubicLeastSquares(
+    samples,
+    uValues,
+    controlPoints[t0].location,
+    controlPoints[t1].location,
+  );
+
+  let maxError = 0;
+  for (let index = t0; index <= t1; index++) {
+    maxError = Math.max(
+      maxError,
+      nativeDistancePointToCubic(controlPoints[index].location, curve),
+    );
+  }
+
+  return {
+    item: {
+      curve,
+      windowStart,
+      windowEnd,
+      t0,
+      t1,
+    },
+    error: maxError,
+  };
+}
+
+function fitNativeLongestSegment(
+  controlPoints: readonly NativeNotabilityControlPoint[],
+  t0: number,
+  errorThreshold: number,
+) {
+  const last = controlPoints.length - 1;
+
+  if (last - t0 + 1 <= NATIVE_MAX_FIT_SAMPLES) {
+    const candidate = fitNativeCandidate(controlPoints, t0, last);
+    if (candidate.error <= errorThreshold) {
+      return candidate.item;
+    }
+  }
+
+  let low = t0 + 1;
+  let high = last;
+  let bestItem: NativeCurveItem | null = null;
+
+  while (low + 1 < high) {
+    const mid = Math.floor((low + high) / 2);
+    if (mid - t0 + 1 > NATIVE_MAX_FIT_SAMPLES) {
+      high = mid;
+      continue;
+    }
+
+    const candidate = fitNativeCandidate(controlPoints, t0, mid);
+    if (candidate.error <= errorThreshold) {
+      bestItem = candidate.item;
+      low = mid;
+    } else {
+      high = mid;
+    }
+  }
+
+  for (const candidateT1 of [high, low].sort((a, b) => b - a)) {
+    if (candidateT1 - t0 + 1 > NATIVE_MAX_FIT_SAMPLES) {
+      continue;
+    }
+    const candidate = fitNativeCandidate(controlPoints, t0, candidateT1);
+    if (candidate.error <= errorThreshold) {
+      return candidate.item;
+    }
+  }
+
+  if (bestItem) {
+    return bestItem;
+  }
+
+  return fitNativeCandidate(controlPoints, t0, Math.min(t0 + 1, last)).item;
+}
+
+function alignNativeCurveStartTangent(
+  curve: CubicCurve,
+  direction: [number, number],
+): CubicCurve {
+  const normalizedDirection = pointNormalize(direction);
+  const originalHandle = pointSubtract(curve.p1, curve.p0);
+  let amount = pointDot(originalHandle, normalizedDirection);
+
+  if (amount <= NATIVE_FIT_EPSILON) {
+    amount = Math.max(
+      pointLength(originalHandle),
+      pointDistance(curve.p3, curve.p0) / 3,
+    );
+  }
+
+  return {
+    ...curve,
+    p1: pointAdd(curve.p0, pointScale(normalizedDirection, amount)),
+  };
+}
+
+function applyNativeContinuity(
+  curveItems: NativeCurveItem[],
+  initialDirection: [number, number] | null,
+) {
+  if (curveItems.length === 0) {
+    return;
+  }
+
+  if (initialDirection && pointDistanceSquared(initialDirection, [0, 0]) > 0) {
+    curveItems[0].curve = alignNativeCurveStartTangent(
+      curveItems[0].curve,
+      initialDirection,
+    );
+  }
+
+  for (let index = 1; index < curveItems.length; index++) {
+    const previousTangent = cubicCurveDerivativeAt(
+      curveItems[index - 1].curve,
+      1,
+    );
+
+    if (pointDistanceSquared(previousTangent, [0, 0]) <= NATIVE_FIT_EPSILON) {
+      continue;
+    }
+
+    curveItems[index].curve = alignNativeCurveStartTangent(
+      curveItems[index].curve,
+      previousTangent,
+    );
+  }
+}
+
+function isSettledNativePoint(point: NativeNotabilityControlPoint) {
+  if (point.predicted) {
+    return false;
+  }
+  if (point.estimatedPropsExpectingUpdates === 0) {
+    return true;
+  }
+  return point.expectedUpdatesTimedOut;
+}
+
+function computeNativeFrozenPrefix(
+  controlPoints: readonly NativeNotabilityControlPoint[],
+  curveItems: readonly NativeCurveItem[],
+) {
+  let numFrozen = 0;
+
+  for (const item of curveItems) {
+    const influencedPoints = controlPoints.slice(
+      item.windowStart,
+      item.windowEnd + 1,
+    );
+    if (influencedPoints.every(isSettledNativePoint)) {
+      numFrozen += 1;
+      continue;
+    }
+    break;
+  }
+
+  return numFrozen;
+}
+
+function buildNativeCurves(
+  controlPoints: readonly NativeNotabilityControlPoint[],
+  errorThreshold: number,
+) {
+  if (controlPoints.length < 2) {
+    return [];
+  }
+
+  const curveItems: NativeCurveItem[] = [];
+  let t0 = 0;
+
+  while (t0 < controlPoints.length - 1) {
+    const item = fitNativeLongestSegment(controlPoints, t0, errorThreshold);
+    curveItems.push(item);
+    if (item.t1 <= t0) {
+      break;
+    }
+    t0 = item.t1;
+  }
+
+  applyNativeContinuity(curveItems, null);
+  computeNativeFrozenPrefix(controlPoints, curveItems);
+
+  return curveItems;
+}
+
+function usesVariableWidthForPenVariant(variant: PenVariant) {
+  return variant === "pen" || variant === "pencil";
+}
+
+function nativeWidthScaleFromForce(force: number) {
+  return 1 + NATIVE_FORCE_TO_WIDTH_SCALE * (force - NATIVE_FORCE_BASELINE);
+}
+
+function nativeAttributeFromPoint(
+  point: NativeNotabilityControlPoint,
+  penVariant: PenVariant,
+): NativePathAttribute {
+  return {
+    widthScale: usesVariableWidthForPenVariant(penVariant)
+      ? nativeWidthScaleFromForce(point.force)
+      : 1,
+    force: point.force,
+    altitude: point.altitude,
+    azimuthX: point.azimuthX,
+    azimuthY: point.azimuthY,
+  };
+}
+
+function lerpNativeAttribute(
+  a: NativePathAttribute,
+  b: NativePathAttribute,
+  t: number,
+): NativePathAttribute {
+  return {
+    widthScale: lerp(a.widthScale, b.widthScale, t),
+    force: lerp(a.force, b.force, t),
+    altitude: lerp(a.altitude, b.altitude, t),
+    azimuthX: lerp(a.azimuthX, b.azimuthX, t),
+    azimuthY: lerp(a.azimuthY, b.azimuthY, t),
+  };
+}
+
+function needsNativeAttributeSplit(
+  predicted: NativePathAttribute,
+  actual: NativePathAttribute,
+  baseWidth: number,
+  zoom: number,
+) {
+  if (Math.abs(actual.force - predicted.force) > NATIVE_FORCE_SPLIT_THRESHOLD) {
+    return true;
+  }
+  if (
+    Math.abs(actual.altitude - predicted.altitude) >
+    NATIVE_ALTITUDE_SPLIT_THRESHOLD
+  ) {
+    return true;
+  }
+  if (
+    Math.abs(actual.azimuthX - predicted.azimuthX) >
+      NATIVE_AZIMUTH_SPLIT_THRESHOLD ||
+    Math.abs(actual.azimuthY - predicted.azimuthY) >
+      NATIVE_AZIMUTH_SPLIT_THRESHOLD
+  ) {
+    return true;
+  }
+
+  return (
+    Math.abs(actual.widthScale - predicted.widthScale) * baseWidth * zoom >
+    NATIVE_WIDTH_SCREEN_SPLIT_THRESHOLD
+  );
+}
+
+function buildNativeAttributedCurves(
+  curveItems: readonly NativeCurveItem[],
+  controlPoints: readonly NativeNotabilityControlPoint[],
+  baseWidth: number,
+  zoom: number,
+  penVariant: PenVariant,
+) {
+  const pointAttributes = controlPoints.map((point) =>
+    nativeAttributeFromPoint(point, penVariant),
+  );
+  const attributedCurves: NativeAttributedCurve[] = [];
+
+  for (const item of curveItems) {
+    if (item.t1 <= item.t0) {
+      continue;
+    }
+
+    let remainderCurve = item.curve;
+    let remainderStartIndex = item.t0;
+    const remainderEndIndex = item.t1;
+
+    while (remainderStartIndex < remainderEndIndex) {
+      const startAttribute = pointAttributes[remainderStartIndex];
+      const endAttribute = pointAttributes[remainderEndIndex];
+      let splitIndex: number | null = null;
+
+      for (
+        let index = remainderStartIndex + 1;
+        index < remainderEndIndex;
+        index++
+      ) {
+        const t =
+          (index - remainderStartIndex) /
+          (remainderEndIndex - remainderStartIndex);
+        const predicted = lerpNativeAttribute(
+          startAttribute,
+          endAttribute,
+          t,
+        );
+        const actual = pointAttributes[index];
+
+        if (needsNativeAttributeSplit(predicted, actual, baseWidth, zoom)) {
+          splitIndex = index;
+          break;
+        }
+      }
+
+      if (splitIndex === null) {
+        attributedCurves.push({
+          curve: remainderCurve,
+          startIndex: remainderStartIndex,
+          endIndex: remainderEndIndex,
+          startAttribute,
+          endAttribute,
+        });
+        break;
+      }
+
+      const splitT =
+        (splitIndex - remainderStartIndex) /
+        (remainderEndIndex - remainderStartIndex);
+      const splitCurves = splitCubicAt(remainderCurve, splitT);
+
+      attributedCurves.push({
+        curve: splitCurves.left,
+        startIndex: remainderStartIndex,
+        endIndex: splitIndex,
+        startAttribute,
+        endAttribute: pointAttributes[splitIndex],
+      });
+
+      remainderCurve = splitCurves.right;
+      remainderStartIndex = splitIndex;
+    }
+  }
+
+  return attributedCurves;
+}
+
+function buildLiveNotabilityStrokeComponent(
+  element: ExcalidrawFreeDrawElement,
+  payload: LiveNotabilityStrokeData,
+): {
+  component: ImportedStrokeComponent;
+  baseWidth: number;
+  firstPoint: [number, number];
+} | null {
+  const controlPoints = buildLiveNotabilityControlPoints(element, payload);
+  if (controlPoints.length === 0) {
+    return null;
+  }
+
+  const baseWidth = Math.max(0.01, element.strokeWidth * 4.25);
+  const zoom =
+    isFiniteNumber(payload.zoomAtCreation) && payload.zoomAtCreation > 0
+      ? payload.zoomAtCreation
+      : 1;
+  const firstPoint = controlPoints[0].location;
+  const initialRadius = Math.max(
+    0.25,
+    baseWidth *
+      nativeAttributeFromPoint(controlPoints[0], element.penVariant).widthScale *
+      0.5,
+  );
+
+  if (controlPoints.length === 1) {
+    return {
+      component: {
+        segments: [],
+        radii: [initialRadius],
+      },
+      baseWidth,
+      firstPoint,
+    };
+  }
+
+  const curveItems = buildNativeCurves(
+    controlPoints,
+    computeNativeErrorThreshold(baseWidth, zoom),
+  );
+  const attributedCurves = buildNativeAttributedCurves(
+    curveItems,
+    controlPoints,
+    baseWidth,
+    zoom,
+    element.penVariant,
+  );
+
+  if (attributedCurves.length === 0) {
+    return {
+      component: {
+        segments: [],
+        radii: [initialRadius],
+      },
+      baseWidth,
+      firstPoint,
+    };
+  }
+
+  const segments: ImportedStrokeSegment[] = [];
+  const radii: number[] = [];
+
+  for (const attributedCurve of attributedCurves) {
+    if (segments.length === 0) {
+      radii.push(
+        Math.max(
+          0.25,
+          baseWidth * attributedCurve.startAttribute.widthScale * 0.5,
+        ),
+      );
+    }
+
+    segments.push(attributedCurve.curve);
+    radii.push(
+      Math.max(0.25, baseWidth * attributedCurve.endAttribute.widthScale * 0.5),
+    );
+  }
+
+  return {
+    component: {
+      segments,
+      radii,
+    },
+    baseWidth,
+    firstPoint,
   };
 }
 
@@ -2173,6 +2999,43 @@ function generateImportedNotabilityStroke(
   };
 }
 
+function generateLiveNotabilityStroke(
+  element: ExcalidrawFreeDrawElement,
+  payload: LiveNotabilityStrokeData,
+): NotabilityStrokeShape | null {
+  const liveStroke = buildLiveNotabilityStrokeComponent(element, payload);
+  if (!liveStroke) {
+    return null;
+  }
+
+  const config = PEN_CONFIGS[element.penVariant] || PEN_CONFIGS.pen;
+  const { component, baseWidth, firstPoint } = liveStroke;
+
+  if (component.segments.length === 0) {
+    const radius = component.radii[0] ?? Math.max(0.5, baseWidth * 0.5);
+    return {
+      type: "notability_stroke",
+      outlinePoints: [],
+      compositeOp: config.compositeOp,
+      penOpacity: config.opacity,
+      roundCaps: true,
+      capStart: { center: firstPoint, radius },
+      capEnd: { center: firstPoint, radius },
+    };
+  }
+
+  return {
+    type: "notability_stroke",
+    outlinePoints: [],
+    ...buildImportedStrokeShapeData(component, baseWidth),
+    compositeOp: config.compositeOp,
+    penOpacity: config.opacity,
+    roundCaps: false,
+    capStart: { center: [0, 0], radius: 0 },
+    capEnd: { center: [0, 0], radius: 0 },
+  };
+}
+
 // ---------------------------------------------------------------------------
 // Main entry point
 // ---------------------------------------------------------------------------
@@ -2187,6 +3050,14 @@ export function generateNotabilityStroke(
   const importedStroke = getImportedNotabilityStrokeData(element);
   if (importedStroke) {
     return generateImportedNotabilityStroke(element, importedStroke);
+  }
+
+  const liveStroke = getLiveNotabilityStrokeData(element);
+  if (liveStroke) {
+    const generatedLiveStroke = generateLiveNotabilityStroke(element, liveStroke);
+    if (generatedLiveStroke) {
+      return generatedLiveStroke;
+    }
   }
 
   const config = PEN_CONFIGS[element.penVariant] || PEN_CONFIGS.pen;

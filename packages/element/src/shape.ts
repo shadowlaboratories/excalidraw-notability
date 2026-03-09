@@ -3,6 +3,7 @@ import { getStroke } from "perfect-freehand";
 import {
   generateNotabilityStroke,
   hasImportedNotabilityStrokeData,
+  hasLiveNotabilityStrokeData,
 } from "./notabilityStroke";
 
 import {
@@ -858,7 +859,8 @@ const _generateElementShape = (
 
       // (2) stroke
       shapes.push(
-        hasImportedNotabilityStrokeData(element)
+        hasImportedNotabilityStrokeData(element) ||
+          hasLiveNotabilityStrokeData(element)
           ? generateNotabilityStroke(element)
           : getFreeDrawSvgPath(element),
       );

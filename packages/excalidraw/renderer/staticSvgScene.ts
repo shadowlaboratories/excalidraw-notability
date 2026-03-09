@@ -382,15 +382,29 @@ const renderElementToSvg = (
       // always ordered as [background, stroke]
       for (const shape of shapes) {
         if (isNotabilityStrokeShape(shape)) {
-          // Notability-style stroke → SVG path from outline points
-          const pts = shape.outlinePoints;
-          if (pts.length > 2) {
-            let d = `M ${pts[0][0].toFixed(2)} ${pts[0][1].toFixed(2)}`;
+          let d = shape.pathData ?? "";
+          if (!d && shape.sampledContours && shape.sampledContours.length > 0) {
+            d = shape.sampledContours
+              .filter((contour) => contour.length > 2)
+              .map((contour) => {
+                let contourPath = `M ${contour[0][0].toFixed(2)} ${contour[0][1].toFixed(2)}`;
+                for (let i = 1; i < contour.length; i++) {
+                  contourPath += ` L ${contour[i][0].toFixed(2)} ${contour[i][1].toFixed(2)}`;
+                }
+                return `${contourPath} Z`;
+              })
+              .join(" ");
+          }
+          if (!d && shape.outlinePoints.length > 2) {
+            const pts = shape.outlinePoints;
+            d = `M ${pts[0][0].toFixed(2)} ${pts[0][1].toFixed(2)}`;
             for (let i = 1; i < pts.length; i++) {
               d += ` L ${pts[i][0].toFixed(2)} ${pts[i][1].toFixed(2)}`;
             }
             d += " Z";
+          }
 
+          if (d) {
             const path = svgRoot.ownerDocument.createElementNS(SVG_NS, "path");
             path.setAttribute(
               "fill",
